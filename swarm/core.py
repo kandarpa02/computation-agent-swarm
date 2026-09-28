@@ -1,6 +1,7 @@
+
 from openai import AsyncOpenAI
 from agents import OpenAIChatCompletionsModel, Runner, Agent
-from ollama import Client
+
 from .agent_workflow import planner
 from .expert_agents import (
     agent_naruto,
@@ -8,20 +9,11 @@ from .expert_agents import (
     agent_kakashi,
     agent_minato,
     agent_itachi,
-    agent_zoro
+    agent_zoro,
 )
 
-async def chat_completion(base_url, api_key, model, prompt):
-    client = AsyncOpenAI(
-        base_url=base_url,
-        api_key=api_key,
-        
-    )
-    Model = OpenAIChatCompletionsModel(
-        model = model,
-        openai_client = client
-    )
 
+def build_orchestrator(model):
     Naruto = agent_naruto(model)
     Sasuke = agent_sasuke(model)
     Kakashi = agent_kakashi(model)
@@ -30,77 +22,55 @@ async def chat_completion(base_url, api_key, model, prompt):
     Zoro = agent_zoro(model)
     planner_agent = planner(model)
 
-    Naruto_tool = Naruto.as_tool(
-        tool_name="naruto",
-        tool_description="Delegate basic reasoning tasks to Naruto."
-    )
+    tools = [
+        Kakashi.as_tool(
+            tool_name="kakashi",
+            tool_description="Analyze the problem."
+        ),
+        Minato.as_tool(
+            tool_name="minato",
+            tool_description="Write and execute Python code."
+        ),
+        Itachi.as_tool(
+            tool_name="itachi",
+            tool_description="Write pseudocode."
+        ),
+        Zoro.as_tool(
+            tool_name="zoro",
+            tool_description="Structure the final explanation."
+        ),
+        planner_agent.as_tool(
+            tool_name="planner",
+            tool_description="Plan and decide the workflow."
+        ),
+        Naruto.as_tool(
+            tool_name="naruto",
+            tool_description="Handle basic reasoning."
+        ),
+        Sasuke.as_tool(
+            tool_name="sasuke",
+            tool_description="Perform advanced reasoning and verification."
+        ),
+    ]
 
-    Sasuke_tool = Sasuke.as_tool(
-        tool_name="sasuke",
-        tool_description="Delegate advanced reasoning and verify Narutos's tasks to Sasuke."
-    )
-
-    Kakashi_tool = Kakashi.as_tool(
-        tool_name="kakashi",
-        tool_description="Delegate analysis tasks to Kakashi."
-    )
-
-    Minato_tool = Minato.as_tool(
-        tool_name="minato",
-        tool_description="Delegate coding and Python execution tasks to Minato."
-    )
-
-    Itachi_tool = Itachi.as_tool(
-        tool_name="itachi",
-        tool_description="Delegate writing pseudocode tasks to Itachi."
-    )
-
-    Zoro_tool = Zoro.as_tool(
-        tool_name="zoro",
-        tool_description="Delegate solution explanation and structuring tasks to Zoro."
-    )
-
-    planner_tool = planner_agent.as_tool(
-        tool_name="planner",
-        tool_description="Delegate task planning and workflow decisions to the planner."
-    )
-    orchestrator = Agent(
+    return Agent(
         name="Orchestrator",
         instructions="""
-        You are the manager of a mathematical problem-solving swarm.
-
-        You have four specialist agents:
-
-        1. Kakashi: analyzes the problem.
-        2. Minato: writes and executes Python code.
-        3. Verifier: checks the solution.
-        4. Zoro: prepares the final explanation.
+        You manage a mathematical problem-solving swarm.
 
         Workflow:
-        - First, call Kakashi to analyze the problem.
-        - Then, call Minato using the analysis.
-        - Send the proposed solution and computation to Verifier.
-        - If the solution is incorrect, use the specialists
-        to correct it and verify it again.
-        - Once verified, call Zoro to prepare the final answer.
+        1. Call Kakashi to analyze the problem.
+        2. Call Minato to write and execute Python code.
+        3. Have Sasuke verify the proposed solution.
+        4. If verification fails, correct the solution and
+           verify it again.
+        5. Call Zoro to prepare the final explanation.
 
-        Do not fabricate results. If verification fails,
-        do not present the solution as verified.
+        Use Itachi when pseudocode is useful.
+        Use Naruto for basic reasoning when appropriate.
+        Do not fabricate results.
+        Never claim a solution is verified if verification fails.
         """,
         model=model,
-        tools=[
-            Kakashi_tool,
-            Minato_tool,
-            Itachi_tool,
-            Zoro_tool,
-            planner_tool,
-            Naruto_tool,
-            Sasuke_tool
-        ],
+        tools=[*tools],
     )
-    rusult = await Runner.run(
-        starting_agent=orchestrator,
-        input=prompt,
-        max_turns=10)
-
-    return rusult.final_output
