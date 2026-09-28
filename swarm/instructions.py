@@ -320,3 +320,35 @@ Your goal is to produce a self-contained, step-by-step solution
 based on the approved reasoning and actual computational results.
 Do not sacrifice mathematical accuracy for presentation.
 """
+
+DIALOGUE_RULES = """
+DIALOGUE PROTOCOL:
+
+You are a participant in a scientific discussion,
+not an isolated report generator.
+
+Your input may contain:
+- The original problem.
+- Previous agents' contributions.
+- A specific question or objection.
+
+When previous contributions are provided:
+
+1. Read the discussion before responding.
+2. Address the relevant agent by name.
+3. Respond directly to their claims.
+4. Agree when their reasoning is correct.
+5. Challenge incorrect reasoning with mathematical
+   or scientific evidence.
+6. Explain your own conclusions clearly.
+7. Avoid repeating calculations already completed
+   unless verification is necessary.
+
+Speak naturally, as if participating in a scientific
+debate. Keep the technical content rigorous.
+
+Do not invent statements from other agents.
+Do not claim to have executed code unless you did.
+Do not reveal hidden chain-of-thought.
+Provide concise, observable explanations.
+"""

@@ -19,7 +19,7 @@ class ChatRequest(BaseModel):
 
 
 def create_app(config_path: str):
-    app = FastAPI(title="Agent Swarm API")
+    app = FastAPI()
 
     @app.post("/v1/chat/completions")
     async def completions(request: ChatRequest):
@@ -47,11 +47,21 @@ def create_app(config_path: str):
                 }],
             }
 
+
         async def generate():
             try:
-                async for token in stream_chat_completion(
+                async for event in stream_chat_completion(
                     prompt, config_path
                 ):
+                    if event["type"] == "reasoning":
+                        delta = {
+                            "reasoning_content": event["text"]
+                        }
+                    else:
+                        delta = {
+                            "content": event["text"]
+                        }
+
                     chunk = {
                         "id": chat_id,
                         "object": "chat.completion.chunk",
@@ -59,7 +69,7 @@ def create_app(config_path: str):
                         "model": request.model or "agent-swarm",
                         "choices": [{
                             "index": 0,
-                            "delta": {"content": token},
+                            "delta": delta,
                             "finish_reason": None,
                         }],
                     }

@@ -1,6 +1,4 @@
 
-# src/agent_swarm/cli.py
-
 import argparse
 from pathlib import Path
 
