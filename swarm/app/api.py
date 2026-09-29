@@ -1,6 +1,4 @@
 
-# src/agent_swarm/server.py
-
 import json
 import time
 import uuid
@@ -18,85 +16,148 @@ class ChatRequest(BaseModel):
     stream: bool = False
 
 
-def create_app(config_path: str):
-    app = FastAPI()
+def messages_to_prompt(messages: list[dict]) -> str:
+    """Convert OpenAI-compatible messages into a text prompt."""
+    parts = []
+
+    for message in messages:
+        role = message.get("role", "user")
+        content = message.get("content", "")
+
+        if isinstance(content, list):
+            text_parts = []
+
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get("type") == "text":
+                        text_parts.append(item.get("text", ""))
+                elif isinstance(item, str):
+                    text_parts.append(item)
+
+            content = "\n".join(text_parts)
+
+        if not isinstance(content, str):
+            content = str(content)
+
+        parts.append(f"{role.upper()}:\n{content}")
+
+    return "\n\n".join(parts)
+
+
+def create_app(config_path: str = "config.yaml"):
+    app = FastAPI(
+        title="Agent Swarm API",
+        version="1.0.0",
+    )
 
     @app.post("/v1/chat/completions")
     async def completions(request: ChatRequest):
         chat_id = f"chatcmpl-{uuid.uuid4().hex}"
+        created = int(time.time())
+        model_name = request.model or "agent-swarm"
 
-        prompt = request.messages
+        prompt = messages_to_prompt(request.messages)
 
         if not request.stream:
             answer = await chat_completion(
-                prompt, config_path
+                prompt,
+                config_path,
             )
 
             return {
                 "id": chat_id,
                 "object": "chat.completion",
-                "created": int(time.time()),
-                "model": request.model or "agent-swarm",
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": answer,
-                    },
-                    "finish_reason": "stop",
-                }],
+                "created": created,
+                "model": model_name,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": answer,
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
             }
-
 
         async def generate():
             try:
                 async for event in stream_chat_completion(
-                    prompt, config_path
+                    prompt,
+                    config_path,
                 ):
-                    if event["type"] == "reasoning":
+                    event_type = event.get("type")
+
+                    if event_type == "reasoning":
                         delta = {
-                            "reasoning_content": event["text"]
+                            "reasoning_content": event.get("text", "")
                         }
+
+                    elif event_type == "content":
+                        delta = {
+                            "content": event.get("text", "")
+                        }
+
+                    elif event_type == "error":
+                        error = {
+                            "error": {
+                                "message": event.get(
+                                    "message",
+                                    "Agent workflow failed.",
+                                ),
+                                "type": "server_error",
+                            }
+                        }
+                        yield f"data: {json.dumps(error)}\n\n"
+                        yield "data: [DONE]\n\n"
+                        return
+
                     else:
-                        delta = {
-                            "content": event["text"]
-                        }
+                        continue
 
                     chunk = {
                         "id": chat_id,
                         "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": request.model or "agent-swarm",
-                        "choices": [{
-                            "index": 0,
-                            "delta": delta,
-                            "finish_reason": None,
-                        }],
+                        "created": created,
+                        "model": model_name,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": delta,
+                                "finish_reason": None,
+                            }
+                        ],
                     }
+
                     yield f"data: {json.dumps(chunk)}\n\n"
 
                 final_chunk = {
                     "id": chat_id,
                     "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": request.model or "agent-swarm",
-                    "choices": [{
-                        "index": 0,
-                        "delta": {},
-                        "finish_reason": "stop",
-                    }],
+                    "created": created,
+                    "model": model_name,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {},
+                            "finish_reason": "stop",
+                        }
+                    ],
                 }
+
                 yield f"data: {json.dumps(final_chunk)}\n\n"
                 yield "data: [DONE]\n\n"
 
-            except Exception:
+            except Exception as exc:
                 error = {
                     "error": {
-                        "message": "Agent workflow failed.",
+                        "message": str(exc),
                         "type": "server_error",
                     }
                 }
                 yield f"data: {json.dumps(error)}\n\n"
+                yield "data: [DONE]\n\n"
 
         return StreamingResponse(
             generate(),
@@ -104,6 +165,7 @@ def create_app(config_path: str):
             headers={
                 "Cache-Control": "no-cache",
                 "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
             },
         )
 
@@ -111,11 +173,13 @@ def create_app(config_path: str):
     async def models():
         return {
             "object": "list",
-            "data": [{
-                "id": "agent-swarm",
-                "object": "model",
-                "owned_by": "agent-swarm",
-            }],
+            "data": [
+                {
+                    "id": "agent-swarm",
+                    "object": "model",
+                    "owned_by": "agent-swarm",
+                }
+            ],
         }
 
     @app.get("/health")

@@ -43,6 +43,7 @@ def agent_minato(model):
             name="Agent Minato",
             instructions=AGENT_MINATO + DIALOGUE_RULES,
             output_type=str,
+            tools=[python_executor],
             model=model
         )
     return agent
