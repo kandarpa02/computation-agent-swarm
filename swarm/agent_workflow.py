@@ -15,7 +15,8 @@ def planner(model):
         FALSE
 
         TRUE: The problem requires numerical calculations
-        that benefit from Python.
+        that benefit from Python, so now use all other agents
+        along with python for numerical accuracy.
 
         FALSE: The problem can be solved without Python.
 
