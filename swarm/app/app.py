@@ -178,7 +178,7 @@ async def stream_chat_completion(prompt, config_path="config.yaml"):
                         "agent": last_agent or "Agent",
                         "text": (
                             f"\n{tool_name}:\n"
-                            f"Arguments: {arguments}"
+                            # f"Arguments: {arguments}"
                         ),
                     }
 
@@ -197,8 +197,8 @@ async def stream_chat_completion(prompt, config_path="config.yaml"):
                         "type": "reasoning",
                         "agent": last_agent or "Agent",
                         "text": (
-                            "\n[Tool result]\n"
-                            f"{output}"
+                            # "\n[Tool result]\n"
+                            f"\n{output}"
                         ),
                     }
 

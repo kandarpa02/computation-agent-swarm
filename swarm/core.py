@@ -72,7 +72,7 @@ def build_orchestrator(model):
                 "Council synthesis specialist. Consult to "
                 "organize established findings, reconcile "
                 "compatible results and prepare a coherent "
-                "final solution."
+                "final solution. Never invent results."
             ),
         ),
     ]
