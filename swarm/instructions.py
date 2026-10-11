@@ -149,6 +149,7 @@ AVAILABLE LIBRARIES:
 
 * math
 * numpy
+* sympy
 * scipy
 * pandas
 * jax
