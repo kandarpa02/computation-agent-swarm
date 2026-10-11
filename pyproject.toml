@@ -30,6 +30,7 @@ dependencies = [
 
     # Scientific computing (NumPy 2.x ecosystem)
     "numpy>=2.1.0,<3.0.0",
+    "sympy>=1.13.1",
     "scipy>=1.14.0,<2.0.0",
     "pandas>=2.2.0,<3.0.0",
 
