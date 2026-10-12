@@ -16,8 +16,59 @@ class ChatRequest(BaseModel):
     stream: bool = False
 
 
+def messages_to_input(messages: list[dict]) -> list[dict]:
+    result = []
+
+    for message in messages:
+        role = message.get("role", "user")
+        content = message.get("content", "")
+
+        # Plain-text message
+        if isinstance(content, str):
+            result.append({
+                "role": role,
+                "content": content,
+            })
+            continue
+
+        # Multimodal message
+        if isinstance(content, list):
+            parts = []
+
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+
+                if item.get("type") == "text":
+                    parts.append({
+                        "type": "input_text",
+                        "text": item.get("text", ""),
+                    })
+
+                elif item.get("type") == "image_url":
+                    image = item.get("image_url", {})
+                    url = (
+                        image.get("url", "")
+                        if isinstance(image, dict)
+                        else image
+                    )
+
+                    if url:
+                        parts.append({
+                            "type": "input_image",
+                            "image_url": url,
+                        })
+
+            result.append({
+                "role": role,
+                "content": parts,
+            })
+
+    return result
+
+
 def messages_to_prompt(messages: list[dict]) -> str:
-    """Convert OpenAI-compatible messages into a text prompt."""
+    """Extract readable text from OpenAI-compatible messages."""
     parts = []
 
     for message in messages:
@@ -43,6 +94,56 @@ def messages_to_prompt(messages: list[dict]) -> str:
 
     return "\n\n".join(parts)
 
+def messages_to_agent_input(messages: list[dict]) -> list[dict]:
+    """Convert OpenAI Chat Completions messages to Agents SDK input."""
+    result = []
+
+    for message in messages:
+        role = message.get("role", "user")
+        content = message.get("content", "")
+
+        if isinstance(content, str):
+            result.append({"role": role, "content": content})
+            continue
+
+        if not isinstance(content, list):
+            continue
+
+        parts = []
+
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+
+            if item.get("type") == "text":
+                parts.append({
+                    "type": "input_text",
+                    "text": item.get("text", ""),
+                })
+
+            elif item.get("type") == "image_url":
+                image = item.get("image_url")
+                image_url = image.get("url") if isinstance(image, dict) else image
+
+                if image_url:
+                    parts.append({
+                        "type": "input_image",
+                        "image_url": image_url,
+                        "detail": "auto",
+                    })
+
+            elif item.get("type") == "input_image":
+                # Already in Agents SDK format.
+                parts.append(item)
+
+            elif item.get("type") == "input_text":
+                parts.append(item)
+
+        if parts:
+            result.append({"role": role, "content": parts})
+
+    return result
+
 
 def create_app(config_path: str = "config.yaml"):
     app = FastAPI(
@@ -56,7 +157,9 @@ def create_app(config_path: str = "config.yaml"):
         created = int(time.time())
         model_name = request.model or "agent-swarm"
 
-        prompt = messages_to_prompt(request.messages)
+        # inputs = messages_to_input(request.messages)
+        # prompt = messages_to_prompt(inputs)
+        prompt = messages_to_agent_input(request.messages)
 
         if not request.stream:
             answer = await chat_completion(

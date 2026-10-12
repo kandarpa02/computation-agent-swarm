@@ -48,10 +48,31 @@ async def create_orchestrator(config_path="config.yaml"):
     return orchestrator, client, generation
 
 
+def extract_text_from_input(agent_input: str | list[dict]) -> str:
+    """Keep readable text in WorkflowState, never store base64 image data."""
+    if isinstance(agent_input, str):
+        return agent_input
+
+    texts = []
+    for message in agent_input:
+        content = message.get("content", "")
+
+        if isinstance(content, str):
+            texts.append(content)
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") in (
+                    "input_text", "text"
+                ):
+                    texts.append(part.get("text", ""))
+
+    return "\n".join(texts)
+
+
 def create_workflow_state(prompt):
     return WorkflowState(
         run_id=str(uuid4()),
-        problem=prompt,
+        problem=extract_text_from_input(prompt),
         status="running",
     )
 
