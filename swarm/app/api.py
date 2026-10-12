@@ -1,100 +1,29 @@
 
 import json
+import logging
 import time
 import uuid
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .app import chat_completion, stream_chat_completion
 
 
+logger = logging.getLogger("agent_swarm.api")
+
+
 class ChatRequest(BaseModel):
     model: str | None = None
-    messages: list[dict]
+    messages: list[dict[str, Any]] = Field(min_length=1)
     stream: bool = False
 
 
-def messages_to_input(messages: list[dict]) -> list[dict]:
-    result = []
-
-    for message in messages:
-        role = message.get("role", "user")
-        content = message.get("content", "")
-
-        # Plain-text message
-        if isinstance(content, str):
-            result.append({
-                "role": role,
-                "content": content,
-            })
-            continue
-
-        # Multimodal message
-        if isinstance(content, list):
-            parts = []
-
-            for item in content:
-                if not isinstance(item, dict):
-                    continue
-
-                if item.get("type") == "text":
-                    parts.append({
-                        "type": "input_text",
-                        "text": item.get("text", ""),
-                    })
-
-                elif item.get("type") == "image_url":
-                    image = item.get("image_url", {})
-                    url = (
-                        image.get("url", "")
-                        if isinstance(image, dict)
-                        else image
-                    )
-
-                    if url:
-                        parts.append({
-                            "type": "input_image",
-                            "image_url": url,
-                        })
-
-            result.append({
-                "role": role,
-                "content": parts,
-            })
-
-    return result
-
-
-def messages_to_prompt(messages: list[dict]) -> str:
-    """Extract readable text from OpenAI-compatible messages."""
-    parts = []
-
-    for message in messages:
-        role = message.get("role", "user")
-        content = message.get("content", "")
-
-        if isinstance(content, list):
-            text_parts = []
-
-            for item in content:
-                if isinstance(item, dict):
-                    if item.get("type") == "text":
-                        text_parts.append(item.get("text", ""))
-                elif isinstance(item, str):
-                    text_parts.append(item)
-
-            content = "\n".join(text_parts)
-
-        if not isinstance(content, str):
-            content = str(content)
-
-        parts.append(f"{role.upper()}:\n{content}")
-
-    return "\n\n".join(parts)
-
-def messages_to_agent_input(messages: list[dict]) -> list[dict]:
+def messages_to_agent_input(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Convert OpenAI Chat Completions messages to Agents SDK input."""
     result = []
 
@@ -102,53 +31,98 @@ def messages_to_agent_input(messages: list[dict]) -> list[dict]:
         role = message.get("role", "user")
         content = message.get("content", "")
 
-        if isinstance(content, str):
-            result.append({"role": role, "content": content})
+        if role not in {"system", "developer", "user", "assistant"}:
+            logger.warning("Skipping unsupported message role: %s", role)
             continue
 
+        # Plain-text messages.
+        if isinstance(content, str):
+            result.append({
+                "role": role,
+                "content": content,
+            })
+            continue
+
+        # Multimodal content.
         if not isinstance(content, list):
+            logger.warning(
+                "Skipping unsupported content type for role %s: %s",
+                role,
+                type(content).__name__,
+            )
             continue
 
         parts = []
 
         for item in content:
             if not isinstance(item, dict):
+                if isinstance(item, str):
+                    parts.append({
+                        "type": "input_text",
+                        "text": item,
+                    })
                 continue
 
-            if item.get("type") == "text":
-                parts.append({
-                    "type": "input_text",
-                    "text": item.get("text", ""),
-                })
+            item_type = item.get("type")
 
-            elif item.get("type") == "image_url":
-                image = item.get("image_url")
-                image_url = image.get("url") if isinstance(image, dict) else image
+            if item_type in {"text", "input_text"}:
+                text = item.get("text", "")
+                if isinstance(text, str):
+                    parts.append({
+                        "type": "input_text",
+                        "text": text,
+                    })
 
-                if image_url:
+            elif item_type == "image_url":
+                image = item.get("image_url", {})
+                image_url = (
+                    image.get("url", "")
+                    if isinstance(image, dict)
+                    else image
+                )
+
+                if isinstance(image_url, str) and image_url:
                     parts.append({
                         "type": "input_image",
                         "image_url": image_url,
-                        "detail": "auto",
+                        "detail": (
+                            image.get("detail", "auto")
+                            if isinstance(image, dict)
+                            else "auto"
+                        ),
                     })
 
-            elif item.get("type") == "input_image":
-                # Already in Agents SDK format.
+            elif item_type == "input_image":
+                # Already expressed in Agents SDK input format.
                 parts.append(item)
 
-            elif item.get("type") == "input_text":
-                parts.append(item)
+            else:
+                logger.debug(
+                    "Ignoring unsupported content part: %s",
+                    item_type,
+                )
 
         if parts:
-            result.append({"role": role, "content": parts})
+            result.append({
+                "role": role,
+                "content": parts,
+            })
+
+    if not result:
+        raise ValueError("No supported messages were provided.")
 
     return result
 
 
-def create_app(config_path: str = "config.yaml"):
+def sse_event(payload: dict[str, Any]) -> str:
+    """Serialize one JSON payload as a Server-Sent Event."""
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def create_app(config_path: str = "config.yaml") -> FastAPI:
     app = FastAPI(
         title="Agent Swarm API",
-        version="1.0.0",
+        version="1.0.1",
     )
 
     @app.post("/v1/chat/completions")
@@ -157,32 +131,56 @@ def create_app(config_path: str = "config.yaml"):
         created = int(time.time())
         model_name = request.model or "agent-swarm"
 
-        # inputs = messages_to_input(request.messages)
-        # prompt = messages_to_prompt(inputs)
-        prompt = messages_to_agent_input(request.messages)
+        try:
+            prompt = messages_to_agent_input(request.messages)
+        except ValueError as exc:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=400,
+                detail=str(exc),
+            ) from exc
+
+        logger.info(
+            "Chat request received: id=%s model=%s stream=%s messages=%d",
+            chat_id,
+            model_name,
+            request.stream,
+            len(request.messages),
+        )
 
         if not request.stream:
-            answer = await chat_completion(
-                prompt,
-                config_path,
-            )
+            try:
+                answer = await chat_completion(
+                    prompt,
+                    config_path,
+                )
 
-            return {
-                "id": chat_id,
-                "object": "chat.completion",
-                "created": created,
-                "model": model_name,
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": answer,
-                        },
-                        "finish_reason": "stop",
-                    }
-                ],
-            }
+                if not isinstance(answer, str):
+                    answer = str(answer)
+
+                return {
+                    "id": chat_id,
+                    "object": "chat.completion",
+                    "created": created,
+                    "model": model_name,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": answer,
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                }
+
+            except Exception:
+                logger.exception(
+                    "Non-streaming chat failed: id=%s",
+                    chat_id,
+                )
+                raise
 
         async def generate():
             try:
@@ -190,33 +188,56 @@ def create_app(config_path: str = "config.yaml"):
                     prompt,
                     config_path,
                 ):
+                    if not isinstance(event, dict):
+                        logger.warning(
+                            "Ignoring unexpected stream event: %s",
+                            type(event).__name__,
+                        )
+                        continue
+
                     event_type = event.get("type")
 
                     if event_type == "reasoning":
                         delta = {
-                            "reasoning_content": event.get("text", "")
+                            "reasoning_content": str(
+                                event.get("text", "")
+                            )
                         }
 
                     elif event_type == "content":
                         delta = {
-                            "content": event.get("text", "")
+                            "content": str(event.get("text", ""))
                         }
 
                     elif event_type == "error":
-                        error = {
+                        logger.error(
+                            "Workflow error: id=%s message=%s",
+                            chat_id,
+                            event.get("message", "Unknown error"),
+                        )
+
+                        error_payload = {
                             "error": {
-                                "message": event.get(
-                                    "message",
-                                    "Agent workflow failed.",
+                                "message": str(
+                                    event.get(
+                                        "message",
+                                        "Agent workflow failed.",
+                                    )
                                 ),
                                 "type": "server_error",
+                                "code": "agent_workflow_error",
                             }
                         }
-                        yield f"data: {json.dumps(error)}\n\n"
+
+                        yield sse_event(error_payload)
                         yield "data: [DONE]\n\n"
                         return
 
                     else:
+                        logger.debug(
+                            "Ignoring unknown event type: %s",
+                            event_type,
+                        )
                         continue
 
                     chunk = {
@@ -233,8 +254,9 @@ def create_app(config_path: str = "config.yaml"):
                         ],
                     }
 
-                    yield f"data: {json.dumps(chunk)}\n\n"
+                    yield sse_event(chunk)
 
+                # End the assistant turn.
                 final_chunk = {
                     "id": chat_id,
                     "object": "chat.completion.chunk",
@@ -249,17 +271,28 @@ def create_app(config_path: str = "config.yaml"):
                     ],
                 }
 
-                yield f"data: {json.dumps(final_chunk)}\n\n"
+                yield sse_event(final_chunk)
                 yield "data: [DONE]\n\n"
 
+                logger.info("Chat stream completed: id=%s", chat_id)
+
             except Exception as exc:
-                error = {
+                logger.exception(
+                    "Streaming chat failed: id=%s",
+                    chat_id,
+                )
+
+                # Once streaming starts, HTTP status codes cannot reliably
+                # be changed. Send an SSE error and terminate the stream.
+                error_payload = {
                     "error": {
                         "message": str(exc),
                         "type": "server_error",
+                        "code": "stream_error",
                     }
                 }
-                yield f"data: {json.dumps(error)}\n\n"
+
+                yield sse_event(error_payload)
                 yield "data: [DONE]\n\n"
 
         return StreamingResponse(
@@ -268,7 +301,6 @@ def create_app(config_path: str = "config.yaml"):
             headers={
                 "Cache-Control": "no-cache",
                 "X-Accel-Buffering": "no",
-                "Connection": "keep-alive",
             },
         )
 
@@ -280,6 +312,7 @@ def create_app(config_path: str = "config.yaml"):
                 {
                     "id": "agent-swarm",
                     "object": "model",
+                    "created": int(time.time()),
                     "owned_by": "agent-swarm",
                 }
             ],
