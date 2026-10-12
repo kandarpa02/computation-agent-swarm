@@ -310,10 +310,10 @@ def create_app(config_path: str = "config.yaml") -> FastAPI:
             "object": "list",
             "data": [
                 {
-                    "id": "agent-swarm",
+                    "id": "nomber",
                     "object": "model",
                     "created": int(time.time()),
-                    "owned_by": "agent-swarm",
+                    "owned_by": "computation-agent-swarm",
                 }
             ],
         }

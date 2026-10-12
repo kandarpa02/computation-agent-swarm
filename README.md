@@ -1,4 +1,4 @@
-# Computation Agent Swarm
+# nomber-computation-agent
 
 An autonomous multi-agent framework for mathematical problem-solving, scientific reasoning, and numerical computation, powered by the OpenAI Agents SDK.
 
