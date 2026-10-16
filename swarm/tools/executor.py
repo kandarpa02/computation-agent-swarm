@@ -26,7 +26,7 @@ def python_executor(code: str) -> str:
             [sys.executable, path],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=500
         )
 
         return (
@@ -36,7 +36,7 @@ def python_executor(code: str) -> str:
         )
 
     except subprocess.TimeoutExpired:
-        return "Execution failed: timeout after 10 seconds."
+        return "Execution failed: timeout after 500 seconds."
 
     except Exception as e:
         return f"Execution failed: {type(e).__name__}: {e}"

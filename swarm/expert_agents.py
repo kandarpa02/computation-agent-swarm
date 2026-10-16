@@ -1,58 +1,68 @@
 from agents import Agent
-from .instructions import *
+
+from .instructions import (
+    AGENT_NARUTO,
+    AGENT_SASUKE,
+    AGENT_KAKASHI,
+    AGENT_ITACHI,
+    AGENT_MINATO,
+    AGENT_ZORO,
+    DIALOGUE_RULES,
+    AGENT_OUTPUT_CONTRACT,
+)
 from .tools.executor import python_executor
 
-def agent_naruto(model):
-    agent = Agent(
-        name="Agent Naruto",
-        instructions=AGENT_NARUTO + DIALOGUE_RULES,
+
+def make_agent(name, instructions, model, tools=None):
+    return Agent(
+        name=name,
+        instructions=(
+            instructions
+            + "\n\n"
+            + AGENT_OUTPUT_CONTRACT
+            + "\n\n"
+            + DIALOGUE_RULES
+        ),
         output_type=str,
-        model=model
+        tools=tools or [],
+        model=model,
     )
-    return agent
+
+
+def agent_naruto(model):
+    return make_agent(
+        "Agent Naruto", AGENT_NARUTO, model
+    )
+
 
 def agent_sasuke(model):
-    agent = Agent(
-            name="Agent Sasuke",
-            instructions=AGENT_SASUKE + DIALOGUE_RULES,
-            output_type=str,
-            model=model
-        )
-    return agent
+    return make_agent(
+        "Agent Sasuke", AGENT_SASUKE, model
+    )
+
 
 def agent_kakashi(model):
-    agent = Agent(
-            name="Agent Kakashi",
-            instructions=AGENT_KAKASHI + DIALOGUE_RULES,
-            output_type=str,
-            model=model
-        )
-    return agent
+    return make_agent(
+        "Agent Kakashi", AGENT_KAKASHI, model
+    )
+
 
 def agent_itachi(model):
-    agent = Agent(
-            name="Agent Itachi",
-            instructions=AGENT_ITACHI + DIALOGUE_RULES,
-            output_type=str,
-            model=model
-        )
-    return agent
+    return make_agent(
+        "Agent Itachi", AGENT_ITACHI, model
+    )
+
 
 def agent_minato(model):
-    agent = Agent(
-            name="Agent Minato",
-            instructions=AGENT_MINATO + DIALOGUE_RULES,
-            output_type=str,
-            tools=[python_executor],
-            model=model
-        )
-    return agent
+    return make_agent(
+        "Agent Minato",
+        AGENT_MINATO,
+        model,
+        # tools=[python_executor],
+    )
+
 
 def agent_zoro(model):
-    agent = Agent(
-            name="Agent Zoro",
-            instructions=AGENT_ZORO + DIALOGUE_RULES,
-            output_type=str,
-            model=model
-        )
-    return agent
+    return make_agent(
+        "Agent Zoro", AGENT_ZORO, model
+    )

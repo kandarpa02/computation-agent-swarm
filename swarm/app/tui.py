@@ -23,7 +23,7 @@ from rich.theme import Theme
 
 from .api import messages_to_agent_input
 from .app import chat_completion, load_config, stream_chat_completion
-
+from .attachments import build_user_message, human_size
 __version__ = "1.2.0"  
 # ----------------------------------------------------------------- aesthetics
 
@@ -347,6 +347,7 @@ class ContentStream:
 
 # ----------------------------------------------------------------- session / REPL
 
+
 def _print_error(console: Console, err: Exception) -> None:
     sub = None
     if isinstance(err, ApiError):
@@ -357,16 +358,18 @@ def _print_error(console: Console, err: Exception) -> None:
             bits.append(err.code)
         if bits:
             sub = Text(" · ".join(bits), style="faint")
+
     console.print(Panel(
-        Text(str(err), style="err"),
-        title=Text(" ✖ error ", style="bold err"),
+        Text(str(err), style="red"),
+        title=Text(" ✖ error ", style="bold red"),
         title_align="left",
         subtitle=sub,
         subtitle_align="right",
         box=box.ROUNDED,
-        border_style="err",
+        border_style="red",
         padding=(0, 1),
     ))
+
 
 
 class Session:
@@ -404,6 +407,27 @@ class Session:
             msgs.append({"role": "system", "content": self.system})
         msgs.extend(self.messages)
         return msgs
+
+    def _attach_files(self, line: str) -> str:
+        """Parse local image paths out of ``line`` and append the resulting
+        multimodal user message to ``self.messages``.
+
+        Returns the original line unchanged — callers don't need to care
+        whether attachments were found. Prints a small confirmation per
+        attached image so the user knows the file was actually read.
+        """
+        msg, attached = build_user_message(line)
+        self.messages.append(msg)
+        for p in attached:
+            try:
+                size = p.stat().st_size
+            except OSError:
+                size = 0
+            self.console.print(
+                f"  [ok]✓[/] [muted]attached image[/] "
+                f"[accent]{p.name}[/] [faint]({human_size(size)})[/]"
+            )
+        return line
 
     def _sync(self, coro_fn):
         """Run a client call in a fresh loop with proper client cleanup."""
@@ -528,8 +552,14 @@ class Session:
             border_style="faint",
             padding=(0, 1),
         ))
-        self.console.print("  [faint]tip · end a line with \\ for a soft wrap · Ctrl+C interrupts a response[/]")
-
+        
+        self.console.print(
+            "  [faint]tip · end a line with \\ for a soft wrap · Ctrl+C interrupts a response[/]"
+        )
+        self.console.print(
+            "  [faint]tip · type an image path (.png/.jpg/.gif/.webp/.bmp) in your message "
+            "to attach it · quotes allowed for paths with spaces[/]"
+        )
     def _cmd_reason(self):
         d = self.last_drawer
         if d and d.text.strip():
@@ -728,7 +758,7 @@ class Session:
                     return
                 continue
 
-            self.messages.append({"role": "user", "content": line})
+            self._attach_files(line)
             self.turn()
 
 
@@ -903,7 +933,7 @@ def run_tui(options: TuiOptions) -> int:
     options.spinner = _valid_spinner(options.spinner)
     session = Session(options)
     if options.prompt:
-        session.messages.append({"role": "user", "content": options.prompt})
+        session._attach_files(options.prompt)
         return 0 if session.turn() == "ok" else 1
     session.repl()
     return 0

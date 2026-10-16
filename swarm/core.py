@@ -1,7 +1,7 @@
 
 from agents import Agent
 
-from .instructions import ORCHESTRATOR_INSTRUCTIONS
+from .instructions import ORCHESTRATOR_INSTRUCTIONS, RECOVERY_POLICY
 from .expert_agents import (
     agent_naruto,
     agent_sasuke,
@@ -11,6 +11,7 @@ from .expert_agents import (
     agent_zoro,
 )
 from .tools.core import read_state, update_state
+from .tools.executor import python_executor
 
 
 def build_orchestrator(model):
@@ -83,11 +84,12 @@ def build_orchestrator(model):
         *council,
         read_state,
         update_state,
+        python_executor
     ]
 
     return Agent(
         name="Council Orchestrator",
-        instructions=ORCHESTRATOR_INSTRUCTIONS,
+        instructions=ORCHESTRATOR_INSTRUCTIONS + "\n\n" + RECOVERY_POLICY,
         model=model,
         tools=tools,
     )

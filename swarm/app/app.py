@@ -199,7 +199,7 @@ async def stream_chat_completion(prompt, config_path="config.yaml"):
                         "agent": last_agent or "Agent",
                         "text": (
                             f"\n{tool_name}:\n"
-                            # f"Arguments: {arguments}"
+                            f"Arguments: {arguments}"
                         ),
                     }
 
