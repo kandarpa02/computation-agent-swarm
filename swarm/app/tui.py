@@ -1,20 +1,3 @@
-#!/usr/bin/env python3
-"""
-agent_swarm.tui — terminal chat client for Agent Swarm.
-
-Antigravity-flavored REPL:
-  - gradient banner, ✦ glyphs, soft dark palette
-  - circular-wheel spinner with rotating verbs while the swarm reasons
-  - collapsible "drawer" for the reasoning trace (/reason to expand)
-  - true SSE streaming into a live markdown block with a cursor
-
-Two transports, chosen by agent_swarm.cli:
-  agent-swarm run config.yaml      -> LocalSwarm   (in-process, no HTTP)
-  agent-swarm chat --base-url ...  -> SwarmClient  (against a running `serve`)
-
-Not meant to be executed directly.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -41,8 +24,7 @@ from rich.theme import Theme
 from .api import messages_to_agent_input
 from .app import chat_completion, load_config, stream_chat_completion
 
-__version__ = "1.2.0"
-
+__version__ = "1.2.0"  
 # ----------------------------------------------------------------- aesthetics
 
 THEME = Theme({
@@ -392,7 +374,12 @@ class Session:
         self.args = args
         self.console = Console(theme=THEME)
         self.messages: list[dict] = []
-        self.model = args.model
+        # In local mode, the YAML config is the source of truth.
+        self.model = (
+            _configured_model(args.config_path)
+            if getattr(args, "config_path", None) is not None
+            else args.model
+        )
         self.stream = not args.no_stream
         self.system = args.system
         self.last_drawer: ReasoningDrawer | None = None
@@ -535,7 +522,7 @@ class Session:
             t.add_row(a, b)
         self.console.print(Panel(
             t,
-            title=Text(" ✦ commands ", style="bold accent2"),
+            title=Text(" ✦ commands ", style="bold #c58af9"),
             title_align="left",
             box=box.ROUNDED,
             border_style="faint",
@@ -548,7 +535,7 @@ class Session:
         if d and d.text.strip():
             self.console.print(Panel(
                 Markdown(d.text),
-                title=Text(" ▸ reasoning ", style="bold accent2"),
+                title=Text(" ▸ reasoning ", style="bold #c58af9"),
                 title_align="left",
                 subtitle=Text(f"{d.elapsed:0.1f}s · {len(d.text):,} chars", style="faint"),
                 subtitle_align="right",
@@ -604,9 +591,19 @@ class Session:
         elif cmd == "reason":
             self._cmd_reason()
         elif cmd == "model":
-            if arg:
-                self.model = arg
-            console.print(f"  [muted]model[/] [accent]{self.model}[/]")
+            if self._is_local():
+                # Local execution always uses provider.model from the YAML.
+                self.model = _configured_model(self.args.config_path)
+                if arg:
+                    console.print(
+                        "  [warn]Local mode uses the model configured in YAML; "
+                        "change provider.model in the config file to switch models.[/]"
+                    )
+                console.print(f"  [muted]model[/] [accent]{self.model}[/]")
+            else:
+                if arg:
+                    self.model = arg
+                console.print(f"  [muted]model[/] [accent]{self.model}[/]")
         elif cmd == "stream":
             if arg == "on":
                 self.stream = True
@@ -647,17 +644,24 @@ class Session:
             line = Text("  ")
             line.append_text(gradient_text(row, row=y / max(len(BANNER) - 1, 1)))
             console.print(line)
+
         console.print()
-        mode = "[ok]streaming[/]" if self.stream else "[muted]no-stream[/]"
+        console.print(f"  [muted]NOMBER[/] [faint]v{__version__}[/]")
+
         if self._is_local():
-            console.print(f"  [muted]config[/]    [accent]{self.args.config_path}[/]")
-            console.print(f"  [muted]mode[/]      [accent]in-process[/] "
-                          f"[faint]· runs the swarm directly, no HTTP[/] · {mode}")
+            # Refresh from config so the banner cannot show a stale CLI default.
+            self.model = _configured_model(self.args.config_path)
+            console.print(
+                f"  [muted]config[/]    [accent]{self.args.config_path}[/]"
+            )
         else:
-            console.print(f"  [muted]endpoint[/]  [accent]{self.args.base_url}[/]")
-            console.print(f"  [muted]mode[/]      [accent]remote[/] "
-                          f"[faint]· via a running agent-swarm serve[/] · {mode}")
-        console.print(f"  [muted]model[/]     {self.model}")
+            console.print(
+                f"  [muted]endpoint[/]  [accent]{self.args.base_url}[/]"
+            )
+
+        console.print(f"  [muted]model[/]     [accent]{self.model}[/]")
+        stream_status = "[ok]on[/]" if self.stream else "[warn]off[/]"
+        console.print(f"  [muted]stream[/]    {stream_status}")
         console.print("  [faint]/help for commands · /exit to quit[/]")
         console.print()
 
@@ -778,6 +782,52 @@ def _count_agents(cfg: Any) -> int | None:
     return probe(lambda k: getattr(cfg, k, None))
 
 
+def _configured_model(config_path: str) -> str:
+    """Read provider.model directly from the YAML used by local execution.
+
+    Reading the raw YAML avoids assumptions about the internal object returned
+    by load_config (which may normalize or omit the nested provider mapping).
+    """
+    try:
+        import yaml
+
+        with Path(config_path).expanduser().open("r", encoding="utf-8") as stream:
+            raw_cfg = yaml.safe_load(stream) or {}
+        if isinstance(raw_cfg, dict):
+            provider = raw_cfg.get("provider")
+            if isinstance(provider, dict):
+                model = provider.get("model")
+                if model is not None and str(model).strip():
+                    return str(model).strip()
+
+            # Backward compatibility for configs using a top-level model.
+            model = raw_cfg.get("model")
+            if model is not None and str(model).strip():
+                return str(model).strip()
+    except Exception:
+        # Fall back to the app's parsed config if direct YAML reading fails.
+        pass
+
+    try:
+        cfg = load_config(Path(config_path))
+        provider = cfg.get("provider") if isinstance(cfg, dict) else getattr(cfg, "provider", None)
+        if isinstance(provider, dict):
+            model = provider.get("model")
+        else:
+            model = getattr(provider, "model", None)
+        if model is not None and str(model).strip():
+            return str(model).strip()
+
+        model = cfg.get("model") if isinstance(cfg, dict) else getattr(cfg, "model", None)
+        if model is not None and str(model).strip():
+            return str(model).strip()
+    except Exception:
+        # _cmd_health() will show the real config error if the config is invalid.
+        pass
+
+    return "unknown (check provider.model)"
+
+
 class LocalSwarm:
     """In-process transport — calls the swarm directly, no HTTP hop.
 
@@ -785,9 +835,10 @@ class LocalSwarm:
     health / aclose) so Session can't tell the difference.
     """
 
-    def __init__(self, config_path: str, model: str = "nomber"):
+    def __init__(self, config_path: str, model: str | None = None):
         self.config_path = config_path
-        self.model = model
+        # The YAML provider.model is authoritative for local execution.
+        self.model = _configured_model(config_path)
 
     def _prompt(self, messages: list[dict]) -> list[dict]:
         try:
@@ -838,7 +889,7 @@ class TuiOptions:
 
     base_url: str = "http://127.0.0.1:8010"
     api_key: str | None = None
-    model: str = "nomber"
+    model: str = "agent-swarm"
     system: str | None = None
     no_stream: bool = False
     spinner: str = "circleHalves"
